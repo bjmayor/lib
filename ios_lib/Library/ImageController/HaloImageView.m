@@ -1,0 +1,259 @@
+//
+//  HaloImageView.m
+//  YContact
+//
+//  Created by peiqiang li on 12-5-9.
+//  Copyright (c) 2012年 . All rights reserved.
+//
+
+#import "HaloImageView.h"
+@interface HaloImageView()
+- (CGRect)rectAroundPoint:(CGPoint)point atZoomScale:(CGFloat)zoomScale;
+@end
+
+@implementation HaloImageView
+@synthesize index = index;
+@synthesize pageIndex = _pageIndex;
+@synthesize imageDelegate = _imageDelegate;
+@synthesize indicatorView = _indicatorView;
+@synthesize reuseIdentifier;
+@synthesize imageView;
+- (id)initWithFrame:(CGRect)frame
+{
+    if ((self = [super initWithFrame:frame])) {
+        self.showsVerticalScrollIndicator = NO;
+        self.showsHorizontalScrollIndicator = NO;
+        self.decelerationRate = UIScrollViewDecelerationRateFast;
+        self.delegate = self;  
+        UITapGestureRecognizer*  singleTap = [[UITapGestureRecognizer alloc] init];
+        singleTap.numberOfTapsRequired = 1;
+        [singleTap addTarget:self action:@selector(singleTap:)];
+        [self addGestureRecognizer:singleTap];
+
+        
+        
+        UITapGestureRecognizer*  tap = [[UITapGestureRecognizer alloc] init];
+        tap.numberOfTapsRequired = 2;
+        [tap addTarget:self action:@selector(doubleTap:)];
+        [self addGestureRecognizer:tap];
+
+        
+        
+        _indicatorView = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhiteLarge];
+        _indicatorView.hidesWhenStopped = YES;
+        [self addSubview:_indicatorView];
+    }
+    return self;
+}
+
+- (void)dealloc
+{
+    self.reuseIdentifier = nil;
+}
+
+#pragma mark -
+#pragma mark Override layoutSubviews to center content
+
+- (void)layoutSubviews 
+{
+    [super layoutSubviews];
+    
+    // center the image as it becomes smaller than the size of the screen
+    
+    CGSize boundsSize = self.bounds.size;
+    CGRect frameToCenter = imageView.frame;
+    
+    // center horizontally
+    if (frameToCenter.size.width < boundsSize.width)
+        frameToCenter.origin.x = (boundsSize.width - frameToCenter.size.width) / 2;
+    else
+        frameToCenter.origin.x = 0;
+    
+    // center vertically
+    if (frameToCenter.size.height < boundsSize.height)
+        frameToCenter.origin.y = (boundsSize.height - frameToCenter.size.height) / 2;
+    else
+        frameToCenter.origin.y = 0;
+    
+    imageView.frame = frameToCenter;
+    
+    self.indicatorView.center = CGPointMake(floorf(self.width/2.0), floorf(self.height/2.0));
+
+}
+- (void)prepareForReuse
+{
+//    [self.imageView cancelCurrentImageLoad];
+    self.imageView.image = nil;
+    self.index = -1;
+}
+#pragma mark -
+#pragma mark UIScrollView delegate methods
+
+- (UIView *)viewForZoomingInScrollView:(UIScrollView *)scrollView
+{
+    return imageView;
+}
+
+#pragma mark -
+#pragma mark Configure scrollView to display new image (tiled or not)
+
+- (void)displayImage:(UIImage *)image
+{
+    
+    DDLogInfo(@"imageSize = %@",NSStringFromCGSize(image.size));
+    // clear the previous imageView
+    [imageView removeFromSuperview];
+    imageView = nil;
+    
+    // reset our zoomScale to 1.0 before doing any further calculations
+    self.zoomScale = 1.0;
+    
+    // make a new UIImageView for the new image
+    imageView = [[UIImageView alloc] initWithImage:image];
+    [self addSubview:imageView];
+    [self bringSubviewToFront:self.indicatorView];
+    
+    self.contentSize = [image size];
+    [self setMaxMinZoomScalesForCurrentBounds];
+    self.zoomScale = self.minimumZoomScale;
+}
+
+- (void)setMaxMinZoomScalesForCurrentBounds
+{
+    CGSize boundsSize = self.bounds.size;
+    CGSize imageSize = imageView.bounds.size;
+    
+    // calculate min/max zoomscale
+    CGFloat xScale = boundsSize.width / imageSize.width;    // the scale needed to perfectly fit the image width-wise
+    CGFloat yScale = boundsSize.height / imageSize.height;  // the scale needed to perfectly fit the image height-wise
+    CGFloat minScale = MIN(xScale, yScale);                 // use minimum of these to allow the image to become fully visible
+    
+    // on high resolution screens we have double the pixel density, so we will be seeing every pixel if we limit the
+    // maximum zoom scale to 0.5.
+    //CGFloat maxScale = 1.0 / [[UIScreen mainScreen] scale];
+    CGFloat maxScale = 1.0;
+
+    // don't let minScale exceed maxScale. (If the image is smaller than the screen, we don't want to force it to be zoomed.) 
+    if (minScale > maxScale) {
+        minScale = maxScale;
+    }
+    
+    self.maximumZoomScale = maxScale;
+    self.minimumZoomScale = minScale;
+}
+
+#pragma mark -
+#pragma mark Methods called during rotation to preserve the zoomScale and the visible portion of the image
+
+// returns the center point, in image coordinate space, to try to restore after rotation. 
+- (CGPoint)pointToCenterAfterRotation
+{
+    CGPoint boundsCenter = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
+    return [self convertPoint:boundsCenter toView:imageView];
+}
+
+// returns the zoom scale to attempt to restore after rotation. 
+- (CGFloat)scaleToRestoreAfterRotation
+{
+    CGFloat contentScale = self.zoomScale;
+    
+    // If we're at the minimum zoom scale, preserve that by returning 0, which will be converted to the minimum
+    // allowable scale when the scale is restored.
+    if (contentScale <= self.minimumZoomScale + FLT_EPSILON)
+        contentScale = 0;
+    
+    return contentScale;
+}
+
+- (CGPoint)maximumContentOffset
+{
+    CGSize contentSize = self.contentSize;
+    CGSize boundsSize = self.bounds.size;
+    return CGPointMake(contentSize.width - boundsSize.width, contentSize.height - boundsSize.height);
+}
+
+- (CGPoint)minimumContentOffset
+{
+    return CGPointZero;
+}
+
+// Adjusts content offset and scale to try to preserve the old zoomscale and center.
+- (void)restoreCenterPoint:(CGPoint)oldCenter scale:(CGFloat)oldScale
+{    
+    // Step 1: restore zoom scale, first making sure it is within the allowable range.
+    self.zoomScale = MIN(self.maximumZoomScale, MAX(self.minimumZoomScale, oldScale));
+    
+    
+    // Step 2: restore center point, first making sure it is within the allowable range.
+    
+    // 2a: convert our desired center point back to our own coordinate space
+    CGPoint boundsCenter = [self convertPoint:oldCenter fromView:imageView];
+    // 2b: calculate the content offset that would yield that center point
+    CGPoint offset = CGPointMake(boundsCenter.x - self.bounds.size.width / 2.0, 
+                                 boundsCenter.y - self.bounds.size.height / 2.0);
+    // 2c: restore offset, adjusted to be within the allowable range
+    CGPoint maxOffset = [self maximumContentOffset];
+    CGPoint minOffset = [self minimumContentOffset];
+    offset.x = MAX(minOffset.x, MIN(maxOffset.x, offset.x));
+    offset.y = MAX(minOffset.y, MIN(maxOffset.y, offset.y));
+    self.contentOffset = offset;
+}
+
+#pragma mark UIGestureRecognizer action
+- (void)doubleTap:(UIGestureRecognizer*)sender
+{
+    DDLogInfo(@"zoomscale = %f max = %f",self.zoomScale,self.maximumZoomScale);
+    BOOL isCompletelyZoomedIn = (self.maximumZoomScale <= self.zoomScale + FLT_EPSILON);
+    if (isCompletelyZoomedIn)
+    {
+        [self setZoomScale:self.minimumZoomScale animated:YES];
+    }
+    else
+    {
+        CGPoint  touchPoint = [sender locationInView:imageView];
+        CGRect  zoomRect = [self rectAroundPoint:touchPoint atZoomScale:self.maximumZoomScale];
+        [self zoomToRect:zoomRect animated:YES];
+    }
+    DDLogInfo(@"2 zoomscale = %f max = %f",self.zoomScale,self.maximumZoomScale);
+    DDLogInfo(@"bounds  = %@ contentSize = %@",NSStringFromCGRect(self.bounds),NSStringFromCGSize(self.contentSize));
+    
+}
+- (void)singleTap:(UIGestureRecognizer*)sender
+{
+    if (self.imageDelegate)
+    {
+        [self.imageDelegate singleTap];
+    }
+}
+- (CGRect)rectAroundPoint:(CGPoint)point atZoomScale:(CGFloat)zoomScale {
+    
+    // Define the shape of the zoom rect.
+    CGSize boundsSize = self.bounds.size;
+    
+    // Modify the size according to the requested zoom level.
+    // For example, if we're zooming in to 0.5 zoom, then this will increase the bounds size
+    // by a factor of two.
+    CGSize scaledBoundsSize = CGSizeMake(boundsSize.width * zoomScale,
+                                         boundsSize.height * zoomScale);
+    
+    CGRect rect = CGRectMake(point.x - scaledBoundsSize.width / 2,
+                             point.y - scaledBoundsSize.height / 2,
+                             scaledBoundsSize.width,
+                             scaledBoundsSize.height);
+    
+    // When the image is zoomed out there is a bit of empty space around the image due
+    // to the fact that it's centered on the screen. When we created the rect around the
+    // point we need to take this "space" into account.
+    
+    // 1: get the frame of the image in this view's coordinates.
+    //CGRect imageScaledFrame = [self convertRect:imageView.frame toView:self];
+    
+    // 2: Offset the frame by the excess amount. This will ensure that the zoomed location
+    //    is always centered on the tap location. We only allow positive values because a
+    //    negative value implies that there isn't actually any offset.
+    //rect = CGRectOffset(rect, -MAX(0, imageScaledFrame.origin.x), -MAX(0, imageScaledFrame.origin.y));
+    
+    return rect;
+}
+@end
+

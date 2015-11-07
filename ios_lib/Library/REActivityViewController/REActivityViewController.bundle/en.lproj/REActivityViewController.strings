@@ -1,0 +1,38 @@
+/*
+ REActivityViewController.strings
+ Created by Benoit Pereira da Silva on 02/13/13.
+ http://www.pereira-da-silva.com
+*/
+
+/////////////////////
+// ACTIVITIES
+/////////////////////
+
+/* Mail */
+"activity.Mail.title"="电子邮件";
+
+/* Copy */
+"activity.Copy.title"="拷贝";
+
+/* Open in Maps */
+"activity.Maps.title"="在地图中打开";
+
+/* Message */
+"activity.Message.title"="信息";
+
+/* Open in Safari */
+"activity.Safari.title"="在Safari中打开";
+
+/* Save to Camera Roll */
+"activity.CameraRoll.title"="保存到相册";
+
+
+/////////////////////
+// GENERIC
+/////////////////////
+
+/* Buttons */
+"button.cancel"="取消";
+
+/* Email */
+"field.email"="电子邮件";
